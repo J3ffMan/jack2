@@ -105,32 +105,29 @@ class store_task_type(type):
 
 	The attribute 'run_str' is compiled into a method 'run' bound to the task class.
 	"""
-	def __init__(cls, name, bases, dict):
-		super(store_task_type, cls).__init__(name, bases, dict)
-		name = cls.__name__
+	def __init__(self, name, bases, dict):
+		super(store_task_type, self).__init__(name, bases, dict)
+		name = self.__name__
 
-		if name != 'evil' and name != 'Task':
-			if getattr(cls, 'run_str', None):
+		if name not in ['evil', 'Task']:
+			if getattr(self, 'run_str', None):
 				# if a string is provided, convert it to a method
-				(f, dvars) = compile_fun(cls.run_str, cls.shell)
-				cls.hcode = Utils.h_cmd(cls.run_str)
-				cls.orig_run_str = cls.run_str
+				(f, dvars) = compile_fun(self.run_str, self.shell)
+				self.hcode = Utils.h_cmd(self.run_str)
+				self.orig_run_str = self.run_str
 				# change the name of run_str or it is impossible to subclass with a function
-				cls.run_str = None
-				cls.run = f
-				# process variables
-				cls.vars = list(set(cls.vars + dvars))
-				cls.vars.sort()
-				if cls.vars:
-					fun = compile_sig_vars(cls.vars)
-					if fun:
-						cls.sig_vars = fun
-			elif getattr(cls, 'run', None) and not 'hcode' in cls.__dict__:
+				self.run_str = None
+				self.run = f
+				self.vars = sorted(set(self.vars + dvars))
+				if self.vars:
+					if fun := compile_sig_vars(self.vars):
+						self.sig_vars = fun
+			elif getattr(self, 'run', None) and 'hcode' not in self.__dict__:
 				# getattr(cls, 'hcode') would look in the upper classes
-				cls.hcode = Utils.h_cmd(cls.run)
+				self.hcode = Utils.h_cmd(self.run)
 
 			# be creative
-			getattr(cls, 'register', classes)[name] = cls
+			getattr(self, 'register', classes)[name] = self
 
 evil = store_task_type('evil', (object,), {})
 "Base class provided to avoid writing a metaclass, so the code can run in python 2.6 and 3.x unmodified"
@@ -291,7 +288,7 @@ class Task(evil):
 		#. stderr: set to None to prevent waf from capturing the process standard error
 		#. timeout: timeout value (Python 3)
 		"""
-		if not 'cwd' in kw:
+		if 'cwd' not in kw:
 			kw['cwd'] = self.get_cwd()
 
 		if hasattr(self, 'timeout'):
@@ -306,25 +303,24 @@ class Task(evil):
 		if hasattr(self, 'stderr'):
 			kw['stderr'] = self.stderr
 
-		# workaround for command line length limit:
-		# http://support.microsoft.com/kb/830473
-		if not isinstance(cmd, str) and (len(repr(cmd)) >= 8192 if Utils.is_win32 else len(cmd) > 200000):
-			cmd, args = self.split_argfile(cmd)
-			try:
-				(fd, tmp) = tempfile.mkstemp()
-				os.write(fd, '\r\n'.join(args).encode())
-				os.close(fd)
-				if Logs.verbose:
-					Logs.debug('argfile: @%r -> %r', tmp, args)
-				return self.generator.bld.exec_command(cmd + ['@' + tmp], **kw)
-			finally:
-				try:
-					os.remove(tmp)
-				except OSError:
-					# anti-virus and indexers can keep files open -_-
-					pass
-		else:
+		if isinstance(cmd, str) or not (
+			len(repr(cmd)) >= 8192 if Utils.is_win32 else len(cmd) > 200000
+		):
 			return self.generator.bld.exec_command(cmd, **kw)
+		cmd, args = self.split_argfile(cmd)
+		try:
+			(fd, tmp) = tempfile.mkstemp()
+			os.write(fd, '\r\n'.join(args).encode())
+			os.close(fd)
+			if Logs.verbose:
+				Logs.debug('argfile: @%r -> %r', tmp, args)
+			return self.generator.bld.exec_command(cmd + [f'@{tmp}'], **kw)
+		finally:
+			try:
+				os.remove(tmp)
+			except OSError:
+				# anti-virus and indexers can keep files open -_-
+				pass
 
 	def process(self):
 		"""
@@ -372,13 +368,8 @@ class Task(evil):
 		if self.generator.bld.progress_bar == 3:
 			return
 
-		s = self.display()
-		if s:
-			if bld.logger:
-				logger = bld.logger
-			else:
-				logger = Logs
-
+		if s := self.display():
+			logger = bld.logger or Logs
 			if self.generator.bld.progress_bar == 1:
 				c1 = Logs.colors.cursor_off
 				c2 = Logs.colors.cursor_on
@@ -483,27 +474,22 @@ class Task(evil):
 		if not tmp:
 			return []
 
-		if isinstance(var2, str):
-			it = self.env[var2]
-		else:
-			it = var2
+		it = self.env[var2] if isinstance(var2, str) else var2
 		if isinstance(tmp, str):
 			return [tmp % x for x in it]
-		else:
-			lst = []
-			for y in it:
-				lst.extend(tmp)
-				lst.append(y)
-			return lst
+		lst = []
+		for y in it:
+			lst.extend(tmp)
+			lst.append(y)
+		return lst
 
 	def __str__(self):
 		"string to display to the user"
 		name = self.__class__.__name__
-		if self.outputs:
-			if name.endswith(('lib', 'program')) or not self.inputs:
-				node = self.outputs[0]
-				return node.path_from(node.ctx.launch_node())
-		if not (self.inputs or self.outputs):
+		if self.outputs and (name.endswith(('lib', 'program')) or not self.inputs):
+			node = self.outputs[0]
+			return node.path_from(node.ctx.launch_node())
+		if not self.inputs:
 			return self.__class__.__name__
 		if len(self.inputs) == 1:
 			node = self.inputs[0]
@@ -511,11 +497,8 @@ class Task(evil):
 
 		src_str = ' '.join([a.path_from(a.ctx.launch_node()) for a in self.inputs])
 		tgt_str = ' '.join([a.path_from(a.ctx.launch_node()) for a in self.outputs])
-		if self.outputs:
-			sep = ' -> '
-		else:
-			sep = ''
-		return '%s: %s%s%s' % (self.__class__.__name__, src_str, sep, tgt_str)
+		sep = ' -> ' if self.outputs else ''
+		return f'{self.__class__.__name__}: {src_str}{sep}{tgt_str}'
 
 	def keyword(self):
 		"Display keyword used to prettify the console outputs"
@@ -525,10 +508,7 @@ class Task(evil):
 		if len(self.inputs) == 1 and len(self.outputs) == 1:
 			return 'Compiling'
 		if not self.inputs:
-			if self.outputs:
-				return 'Creating'
-			else:
-				return 'Running'
+			return 'Creating' if self.outputs else 'Running'
 		return 'Processing'
 
 	def __repr__(self):
@@ -817,10 +797,7 @@ class Task(evil):
 
 		# get the task signatures from previous runs
 		key = self.uid()
-		prev = bld.imp_sigs.get(key, [])
-
-		# for issue #379
-		if prev:
+		if prev := bld.imp_sigs.get(key, []):
 			try:
 				if prev == self.compute_sig_implicit_deps():
 					return prev
@@ -941,10 +918,7 @@ def is_before(t1, t2):
 	if t1.__class__.__name__ in to_list(t2.after):
 		return 1
 
-	if t2.__class__.__name__ in to_list(t1.before):
-		return 1
-
-	return 0
+	return 1 if t2.__class__.__name__ in to_list(t1.before) else 0
 
 def set_file_constraints(tasks):
 	"""
@@ -982,10 +956,7 @@ class TaskGroup(object):
 		self.done = False
 
 	def get_hasrun(self):
-		for k in self.prev:
-			if not k.hasrun:
-				return NOT_RUN
-		return SUCCESS
+		return next((NOT_RUN for k in self.prev if not k.hasrun), SUCCESS)
 
 	hasrun = property(get_hasrun, None)
 
@@ -1062,6 +1033,7 @@ def compile_fun_shell(line):
 			extr.append((g('var'), g('code')))
 			return "%s"
 		return None
+
 	line = reg_act.sub(repl, line) or line
 	dvars = []
 	def add_dvar(x):
@@ -1084,12 +1056,12 @@ def compile_fun_shell(line):
 	for (var, meth) in extr:
 		if var == 'SRC':
 			if meth:
-				app('tsk.inputs%s' % meth)
+				app(f'tsk.inputs{meth}')
 			else:
 				app('" ".join([a.path_from(cwdx) for a in tsk.inputs])')
 		elif var == 'TGT':
 			if meth:
-				app('tsk.outputs%s' % meth)
+				app(f'tsk.outputs{meth}')
 			else:
 				app('" ".join([a.path_from(cwdx) for a in tsk.outputs])')
 		elif meth:
@@ -1101,9 +1073,9 @@ def compile_fun_shell(line):
 				elif m == 'TGT':
 					m = '[a.path_from(cwdx) for a in tsk.outputs]'
 				elif re_novar.match(m):
-					m = '[tsk.inputs%s]' % m[3:]
+					m = f'[tsk.inputs{m[3:]}]'
 				elif re_novar.match(m):
-					m = '[tsk.outputs%s]' % m[3:]
+					m = f'[tsk.outputs{m[3:]}]'
 				else:
 					add_dvar(m)
 					if m[:3] not in ('tsk', 'gen', 'bld'):
@@ -1114,17 +1086,13 @@ def compile_fun_shell(line):
 				expr = re_cond.sub(replc, meth[1:])
 				app('p(%r) if (%s) else ""' % (var, expr))
 			else:
-				call = '%s%s' % (var, meth)
+				call = f'{var}{meth}'
 				add_dvar(call)
 				app(call)
 		else:
 			add_dvar(var)
 			app("p('%s')" % var)
-	if parm:
-		parm = "%% (%s) " % (',\n\t\t'.join(parm))
-	else:
-		parm = ''
-
+	parm = "%% (%s) " % (',\n\t\t'.join(parm)) if parm else ''
 	c = COMPILE_TEMPLATE_SHELL % (line, parm)
 	Logs.debug('action: %s', c.strip().splitlines())
 	return (funex(c), dvars)
@@ -1165,12 +1133,12 @@ def compile_fun_noshell(line):
 			code = m.group('code')
 			if var == 'SRC':
 				if code:
-					app('[tsk.inputs%s]' % code)
+					app(f'[tsk.inputs{code}]')
 				else:
 					app('[a.path_from(cwdx) for a in tsk.inputs]')
 			elif var == 'TGT':
 				if code:
-					app('[tsk.outputs%s]' % code)
+					app(f'[tsk.outputs{code}]')
 				else:
 					app('[a.path_from(cwdx) for a in tsk.outputs]')
 			elif code:
@@ -1183,9 +1151,9 @@ def compile_fun_noshell(line):
 					elif m == 'TGT':
 						m = '[a.path_from(cwdx) for a in tsk.outputs]'
 					elif re_novar.match(m):
-						m = '[tsk.inputs%s]' % m[3:]
+						m = f'[tsk.inputs{m[3:]}]'
 					elif re_novar.match(m):
-						m = '[tsk.outputs%s]' % m[3:]
+						m = f'[tsk.outputs{m[3:]}]'
 					else:
 						add_dvar(m)
 						if m[:3] not in ('tsk', 'gen', 'bld'):
@@ -1197,20 +1165,20 @@ def compile_fun_noshell(line):
 					app('to_list(env[%r] if (%s) else [])' % (var, expr))
 				else:
 					# plain code such as ${tsk.inputs[0].abspath()}
-					call = '%s%s' % (var, code)
+					call = f'{var}{code}'
 					add_dvar(call)
-					app('to_list(%s)' % call)
+					app(f'to_list({call})')
 			else:
 				# a plain variable such as # a plain variable like ${AR}
 				app('to_list(env[%r])' % var)
 				add_dvar(var)
 		if merge:
-			tmp = 'merge(%s, %s)' % (buf[-2], buf[-1])
+			tmp = f'merge({buf[-2]}, {buf[-1]})'
 			del buf[-1]
 			buf[-1] = tmp
 		merge = True # next turn
 
-	buf = ['lst.extend(%s)' % x for x in buf]
+	buf = [f'lst.extend({x})' for x in buf]
 	fun = COMPILE_TEMPLATE_NOSHELL % "\n\t".join(buf)
 	Logs.debug('action: %s', fun.strip().splitlines())
 	return (funex(fun), dvars)
@@ -1255,10 +1223,7 @@ def compile_fun(line, shell=False):
 					return ret
 			return None
 		return composed_fun, dvars_lst
-	if shell:
-		return compile_fun_shell(line)
-	else:
-		return compile_fun_noshell(line)
+	return compile_fun_shell(line) if shell else compile_fun_noshell(line)
 
 def compile_sig_vars(vars):
 	"""
@@ -1282,11 +1247,9 @@ def compile_sig_vars(vars):
 	:return: A sig_vars method relevant for dependencies if adequate, else None
 	:rtype: A function, or None in most cases
 	"""
-	buf = []
-	for x in sorted(vars):
-		if x[:3] in ('tsk', 'gen', 'bld'):
-			buf.append('buf.append(%s)' % x)
-	if buf:
+	if buf := [
+		f'buf.append({x})' for x in sorted(vars) if x[:3] in ('tsk', 'gen', 'bld')
+	]:
 		return funex(COMPILE_TEMPLATE_SIG_VARS % '\n\t'.join(buf))
 	return None
 
@@ -1315,7 +1278,7 @@ def task_factory(name, func=None, vars=None, color='GREEN', ext_in=[], ext_out=[
 		'scan': scan,
 	}
 
-	if isinstance(func, str) or isinstance(func, tuple):
+	if isinstance(func, (str, tuple)):
 		params['run_str'] = func
 	else:
 		params['run'] = func

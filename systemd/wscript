@@ -11,11 +11,11 @@ def set_systemd_user_unit_dir(conf):
             args='--variable=systemduserunitdir',
             okmsg='Successfully detected systemd user unit dir.',
             errormsg='Could not detect systemd user unit dir. Skipping...')
-    if not systemd_user_unit_dir:
-        conf.env['SYSTEMD_USER_UNIT_DIR'] = None
-    else:
-        conf.env['SYSTEMD_USER_UNIT_DIR'] = \
-                systemd_user_unit_dir.replace("\n", "")
+    conf.env['SYSTEMD_USER_UNIT_DIR'] = (
+        systemd_user_unit_dir.replace("\n", "")
+        if systemd_user_unit_dir
+        else None
+    )
 
 
 def configure(conf):
