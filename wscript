@@ -32,12 +32,10 @@ def display_feature(conf, msg, build):
 def check_for_celt(conf):
     found = False
     for version in ['11', '8', '7', '5']:
-        define = 'HAVE_CELT_API_0_' + version
+        define = f'HAVE_CELT_API_0_{version}'
         if not found:
             try:
-                conf.check_cfg(
-                        package='celt >= 0.%s.0' % version,
-                        args='--cflags --libs')
+                conf.check_cfg(package=f'celt >= 0.{version}.0', args='--cflags --libs')
                 found = True
                 conf.define(define, 1)
                 continue

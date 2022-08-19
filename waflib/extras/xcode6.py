@@ -85,7 +85,7 @@ TARGET_TYPES = {
 def delete_invalid_values(dct):
 	""" Deletes entries that are dictionaries or sets """
 	for k, v in list(dct.items()):
-		if isinstance(v, dict) or isinstance(v, set):
+		if isinstance(v, (dict, set)):
 			del dct[k]
 	return dct
 
@@ -186,18 +186,19 @@ class XCodeNode(object):
 			value.write(file)
 
 	def write(self, file):
-		if not self._been_written:
-			self._been_written = True
-			for attribute,value in self.__dict__.items():
-				if attribute[0] != '_':
-					self.write_recursive(value, file)
-			w = file.write
-			w("\t%s = {\n" % self._id)
-			w("\t\tisa = %s;\n" % self.__class__.__name__)
-			for attribute,value in self.__dict__.items():
-				if attribute[0] != '_':
-					w("\t\t%s = %s;\n" % (attribute, self.tostring(value)))
-			w("\t};\n\n")
+		if self._been_written:
+			return
+		self._been_written = True
+		for attribute,value in self.__dict__.items():
+			if attribute[0] != '_':
+				self.write_recursive(value, file)
+		w = file.write
+		w("\t%s = {\n" % self._id)
+		w("\t\tisa = %s;\n" % self.__class__.__name__)
+		for attribute,value in self.__dict__.items():
+			if attribute[0] != '_':
+				w("\t\t%s = %s;\n" % (attribute, self.tostring(value)))
+		w("\t};\n\n")
 
 # Configurations
 class XCBuildConfiguration(XCodeNode):
@@ -295,8 +296,7 @@ class PBXGroup(XCodeNode):
 			return self._filerefs[fileref]
 		elif self.children:
 			for childgroup in self.get_sub_groups():
-				f = childgroup.find_fileref(fileref)
-				if f:
+				if f := childgroup.find_fileref(fileref):
 					return f
 		return None
 
@@ -353,10 +353,12 @@ class PBXLegacyTarget(XCodeNode):
 	def __init__(self, action, target=''):
 		XCodeNode.__init__(self)
 		self.buildConfigurationList = XCConfigurationList([XCBuildConfiguration('waf', {})])
-		if not target:
-			self.buildArgumentsString = "%s %s" % (sys.argv[0], action)
-		else:
-			self.buildArgumentsString = "%s %s --targets=%s" % (sys.argv[0], action, target)
+		self.buildArgumentsString = (
+			f"{sys.argv[0]} {action} --targets={target}"
+			if target
+			else f"{sys.argv[0]} {action}"
+		)
+
 		self.buildPhases = []
 		self.buildToolPath = sys.executable
 		self.buildWorkingDirectory = ""
@@ -374,7 +376,9 @@ class PBXShellScriptBuildPhase(XCodeNode):
 		self.outputPaths = []
 		self.runOnlyForDeploymentPostProcessing = 0
 		self.shellPath = "/bin/sh"
-		self.shellScript = "%s %s %s --targets=%s" % (sys.executable, sys.argv[0], action, target)
+		self.shellScript = (
+			f"{sys.executable} {sys.argv[0]} {action} --targets={target}"
+		)
 
 class PBXNativeTarget(XCodeNode):
 	""" Represents a target in XCode, e.g. App, DyLib, Framework etc. """
@@ -398,8 +402,7 @@ class PBXNativeTarget(XCodeNode):
 
 	def add_build_phase(self, phase):
 		# Some build phase types may appear only once. If a phase type already exists, then merge them.
-		if ( (phase.__class__ == PBXFrameworksBuildPhase)
-			or (phase.__class__ == PBXSourcesBuildPhase) ):
+		if phase.__class__ in [PBXFrameworksBuildPhase, PBXSourcesBuildPhase]:
 			for b in self.buildPhases:
 				if b.__class__ == phase.__class__:
 					b.files.extend(phase.files)
@@ -435,8 +438,7 @@ class PBXProject(XCodeNode):
 	def create_target_dependency(self, target, name):
 		""" : param target : PXBNativeTarget """
 		proxy = PBXContainerItemProxy(self, target, name)
-		dependency = PBXTargetDependency(target, proxy)
-		return dependency
+		return PBXTargetDependency(target, proxy)
 
 	def write(self, file):
 
@@ -464,10 +466,7 @@ class PBXProject(XCodeNode):
 
 	def get_target(self, name):
 		""" Get a reference to PBXNativeTarget if it exists """
-		for t in self.targets:
-			if t.name == name:
-				return t
-		return None
+		return next((t for t in self.targets if t.name == name), None)
 
 @TaskGen.feature('c', 'cxx')
 @TaskGen.after('propagate_uselib_vars', 'apply_incpaths')

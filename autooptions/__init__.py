@@ -121,7 +121,7 @@ class AutoOption:
         else:
             option_help = no_option_help = optparse.SUPPRESS_HELP
 
-        self.dest = 'auto_option_' + name
+        self.dest = f'auto_option_{name}'
 
         self.default = default
 
@@ -146,14 +146,14 @@ class AutoOption:
         # with:
         #  --with-foo | --without-foo
         if style in ['plain', 'yesno', 'yesno_and_hack']:
-            self.no_option = '--no-' + name
-            self.yes_option = '--' + name
+            self.no_option = f'--no-{name}'
+            self.yes_option = f'--{name}'
         elif style == 'enable':
-            self.no_option = '--disable-' + name
-            self.yes_option = '--enable-' + name
+            self.no_option = f'--disable-{name}'
+            self.yes_option = f'--enable-{name}'
         elif style == 'with':
-            self.no_option = '--without-' + name
-            self.yes_option = '--with-' + name
+            self.no_option = f'--without-{name}'
+            self.yes_option = f'--with-{name}'
         else:
             opt.fatal('invalid style')
 
@@ -366,9 +366,9 @@ def apply_auto_options_hack(self):
         if option.style == 'yesno_and_hack':
             for i in range(1, len(sys.argv)):
                 if sys.argv[i] == option.yes_option:
-                    sys.argv[i] = option.yes_option + '=yes'
+                    sys.argv[i] = f'{option.yes_option}=yes'
                 elif sys.argv[i] == option.no_option:
-                    sys.argv[i] = option.yes_option + '=no'
+                    sys.argv[i] = f'{option.yes_option}=no'
 
 @Configure.conf
 def summarize_auto_options(self):
